@@ -1,0 +1,16 @@
+[package]
+name = "be-meeturbate"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+actix-web = "4.0"
+actix-rt = "2.5"
+actix-ws = "0.3.0"
+tokio = { version = "1", features = ["full"] }   # For async runtime
+serde = { version = "1", features = ["derive"] } # Serialization/deserialization
+futures = "0.3"                                  # For async streams
+env_logger = "0.11.5"                            # Logging
+dotenv = "0.15"                                  # For loading env variables
+actix-multipart = "0.7.2"                        # Handling multipart requests for video upload
+ffmpeg-sys-next = "7.1.0"
