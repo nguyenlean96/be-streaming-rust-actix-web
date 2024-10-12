@@ -1,4 +1,14 @@
 services:
+  rust:
+    image: rust:latest
+    container_name: rust
+    ports:
+      - 8080:8080
+    tty: true
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: bash
   app:
     build: .
     ports:
@@ -26,3 +36,6 @@ services:
     environment:
       - MINIO_ROOT_USER=minioadmin
       - MINIO_ROOT_PASSWORD=minioadmin
+networks:
+  default:
+    name: rust
