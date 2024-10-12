@@ -1,79 +1,80 @@
-use std::sync::Mutex;
-use std::future::{ready, Ready};
-use actix_web::{
-    dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
-    get, post, web, App, HttpResponse, HttpServer, Responder, Error,
+//! Multi-room WebSocket chat server.
+//!
+//! Open `http://localhost:8080/` in browser to test.
+
+use std::io;
+
+use actix_files::NamedFile;
+use actix_web::{middleware, web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
+use tokio::{
+    task::{spawn, spawn_local},
+    try_join,
 };
-use actix_web::middleware::Logger;
 
-#[get("/")]
-async fn hello() -> impl Responder {
-    HttpResponse::Ok().body("Hello world!")
+// mod handler;
+// mod server;
+
+// pub use self::server::{ChatServer, ChatServerHandle};
+use crate::handlers::chat_handler;
+pub use crate::server::{ChatServer, ChatServerHandle};
+
+/// Connection ID.
+// pub type ConnId = usize;
+
+/// Room ID.
+// pub type RoomId = String;
+
+/// Message sent to a room/client.
+// pub type Msg = String;
+
+async fn index() -> impl Responder {
+    NamedFile::open_async("./static/index.html").await.unwrap()
 }
 
-#[post("/echo")]
-async fn echo(req_body: String) -> impl Responder {
-    HttpResponse::Ok().body(req_body)
+/// Handshake and start WebSocket handler with heartbeats.
+async fn chat_ws(
+    req: HttpRequest,
+    stream: web::Payload,
+    chat_server: web::Data<ChatServerHandle>,
+) -> Result<HttpResponse, Error> {
+    let (res, session, msg_stream) = actix_ws::handle(&req, stream)?;
+
+    // spawn websocket handler (and don't await it) so that the response is returned immediately
+    spawn_local(chat_handler::chat_ws(
+        (**chat_server).clone(),
+        session,
+        msg_stream,
+    ));
+
+    Ok(res)
 }
 
-// This struct represents state
-struct AppState {
-    app_name: String,
-}
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> io::Result<()> {
+    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
-async fn index(data: web::Data<AppState>) -> String {
-    let app_name = &data.app_name; // <- get app_name
-    format!("Hello {app_name}!") // <- response with app_name
-}
+    log::info!("starting HTTP server at http://localhost:8080");
 
-async fn manual_hello() -> impl Responder {
-    HttpResponse::Ok().body("Hey there!")
-}
+    let (chat_server, server_tx) = ChatServer::new();
 
-struct AppStateWithCounter {
-    counter: Mutex<i32>, // <- Mutex is necessary to mutate safely across threads
-}
+    let chat_server = spawn(chat_server.run());
 
-async fn index_mutate(data: web::Data<AppStateWithCounter>) -> String {
-    let mut counter = data.counter.lock().unwrap(); // <- get counter's MutexGuard
-    *counter += 1; // <- access counter inside MutexGuard
-
-    format!("Request number: {counter}") // <- response with count
-}
-
-#[actix_web::main]
-async fn main() -> std::io::Result<()> {
-    env_logger::init(); // Initialize logging
-
-    // Note: web::Data created _outside_ HttpServer::new closure
-    let counter = web::Data::new(AppStateWithCounter {
-        counter: Mutex::new(0),
-    });
-    
-    HttpServer::new(move || {
+    let http_server = HttpServer::new(move || {
         App::new()
-        .wrap(Logger::default())
-        .app_data(counter.clone()) // <- register the created data
-        .service(
-            web::scope("mutate")
-                .route("", web::get().to(index_mutate))
-        )
-        .app_data(web::Data::new(AppState {
-            app_name: String::from("Actix Web"),
-        }))
-        .service(
-            web::scope("/state")
-                .route("", web::get().to(index))
-        )
-        .service(
-            // prefixes all resources and routes attached to it...
-            web::scope("/app")
-                // ...so this handles requests for `GET /app/index.html`
-                // .route("", web::get().to(index))
-                .route("/manual-hello", web::get().to(manual_hello)),
-        )
+            .app_data(web::Data::new(server_tx.clone()))
+            // WebSocket UI HTML file
+            .service(web::resource("/").to(index))
+            // websocket routes
+            .service(web::resource("/ws").route(web::get().to(chat_ws)))
+            // standard middleware
+            .wrap(middleware::NormalizePath::trim())
+            .wrap(middleware::Logger::default())
     })
+    .workers(2)
     .bind(("127.0.0.1", 8080))?
-    .run()
-    .await
+    .run();
+
+    try_join!(http_server, async move { chat_server.await.unwrap() })?;
+
+    Ok(())
 }
