@@ -3,26 +3,17 @@ name = "be-meeturbate"
 version = "0.1.0"
 edition = "2021"
 
-[lib]
-proc-macro = true
-crate-type = ["lib"]
-
 [dependencies]
-# actix = "0.13.5"
-actix-files = "0.6.6"
 actix-web = "4"
-actix-ws = "0.3.0"
-actix-rt = "2"
-actix-multipart = "0.7.2"                        # Handling multipart requests for video upload
-# actix-cors = "0.7.0"                             # For CORS
-tokio = { version = "1", features = ["full"] }   # For async runtime
-serde = { version = "1", features = ["derive"] } # Serialization/deserialization
-serde_json = "1"
-futures = "0.3"                                  # For async streams
+actix-files = "0.6"
+actix-ws = "0.3"
+tokio = { version = "1.40", features = ["rt", "time", "macros"] }
 futures-util = "0.3"
-reqwest = { version = "0.12.8", features = ["json"] } # For making HTTP requests
-env_logger = "0.11.5"                            # Logging
-dotenv = "0.15"                                  # For loading env variables
-# ffmpeg-sys-next = "7.1.0"                        # For video processing
-rand = "0.8"
-log = "0.4"                                   # Logging
+log = "0.4"
+env_logger = "0.11"
+serde = { version = "1.0", features = ["derive"] }
+futures = "0.3"
+rand = "0.8.4"
+
+[dev-dependencies]
+tokio-test = "0.4"  # For testing async code
