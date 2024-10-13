@@ -10,10 +10,18 @@ use std::{
 };
 
 use rand::{thread_rng, Rng as _};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Mutex};
 
-// use crate::{ConnId, Msg, RoomId};
-use crate::types::{conn_id::ConnId, msg::Msg, room_id::RoomId};
+use crate::{ConnId, Msg, RoomId};
+
+/// Stream ID and Viewer ID types for managing sessions
+pub type StreamId = String;
+
+/// Viewer ID
+pub type ViewerId = usize;
+
+/// Video data chunk (could be bytes or frames)
+pub type VideoChunk = Vec<u8>;
 
 /// A command received by the [`ChatServer`].
 #[derive(Debug)]
@@ -292,5 +300,79 @@ impl ChatServerHandle {
     pub fn disconnect(&self, conn: ConnId) {
         // unwrap: chat server should not have been dropped
         self.cmd_tx.send(Command::Disconnect { conn }).unwrap();
+    }
+}
+
+/// Structure to hold active streams and their viewers
+#[derive(Default)]
+pub struct StreamServer {
+    streams: Mutex<HashMap<StreamId, StreamSession>>,
+}
+
+/// Structure representing a streaming session
+pub struct StreamSession {
+    broadcaster: mpsc::UnboundedSender<VideoChunk>,  // Sender for video data
+    viewers: HashMap<ViewerId, mpsc::UnboundedSender<VideoChunk>>,  // Viewers receiving data
+}
+
+impl StreamServer {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            streams: Mutex::new(HashMap::new()),
+        })
+    }
+
+    /// Add a new viewer to an active stream
+    pub async fn add_viewer(
+        &self, 
+        stream_id: &StreamId, 
+        viewer_tx: mpsc::UnboundedSender<VideoChunk>
+    ) -> Result<(), &'static str> {
+        let mut streams = self.streams.lock().await;
+
+        if let Some(session) = streams.get_mut(stream_id) {
+            let viewer_id = session.viewers.len() + 1;
+            session.viewers.insert(viewer_id, viewer_tx);
+            Ok(())
+        } else {
+            Err("Stream not found")
+        }
+    }
+
+    /// Broadcast video data to viewers of a stream
+    pub async fn broadcast_video(&self, stream_id: &StreamId, chunk: VideoChunk) -> Result<(), &'static str> {
+        let streams = self.streams.lock().await;
+
+        if let Some(session) = streams.get(stream_id) {
+            for viewer in session.viewers.values() {
+                let _ = viewer.send(chunk.clone());
+            }
+            Ok(())
+        } else {
+            Err("Stream not found")
+        }
+    }
+
+    /// Start a new streaming session
+    pub async fn start_stream(
+        &self, 
+        stream_id: StreamId, 
+        broadcaster_tx: &mpsc::UnboundedSender<VideoChunk>
+    ) {
+        let mut streams = self.streams.lock().await;
+
+        streams.insert(
+            stream_id,
+            StreamSession {
+                broadcaster: broadcaster_tx.clone(),
+                viewers: HashMap::new(),
+            },
+        );
+    }
+
+    /// End a stream session
+    pub async fn end_stream(&self, stream_id: &StreamId) {
+        let mut streams = self.streams.lock().await;
+        streams.remove(stream_id);
     }
 }

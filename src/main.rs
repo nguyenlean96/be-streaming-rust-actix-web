@@ -5,27 +5,27 @@
 use std::io;
 
 use actix_files::NamedFile;
-use actix_web::{middleware, web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
+use actix_web::{middleware, web, App, Error, HttpServer, HttpRequest, HttpResponse, Responder};
 use tokio::{
     task::{spawn, spawn_local},
-    try_join,
+    try_join
 };
 
-// mod handler;
-// mod server;
+mod handlers;
+mod server;
+use env_logger;
+mod video;
 
-// pub use self::server::{ChatServer, ChatServerHandle};
-use crate::handlers::chat_handler;
-pub use crate::server::{ChatServer, ChatServerHandle};
+pub use self::server::{ChatServer, ChatServerHandle};
 
 /// Connection ID.
-// pub type ConnId = usize;
+pub type ConnId = usize;
 
 /// Room ID.
-// pub type RoomId = String;
+pub type RoomId = String;
 
 /// Message sent to a room/client.
-// pub type Msg = String;
+pub type Msg = String;
 
 async fn index() -> impl Responder {
     NamedFile::open_async("./static/index.html").await.unwrap()
@@ -40,7 +40,7 @@ async fn chat_ws(
     let (res, session, msg_stream) = actix_ws::handle(&req, stream)?;
 
     // spawn websocket handler (and don't await it) so that the response is returned immediately
-    spawn_local(chat_handler::chat_ws(
+    spawn_local(handlers::chat_handler::chat_ws(
         (**chat_server).clone(),
         session,
         msg_stream,
@@ -57,10 +57,15 @@ async fn main() -> io::Result<()> {
 
     let (chat_server, server_tx) = ChatServer::new();
 
+    let stream_server = server::StreamServer::new();
     let chat_server = spawn(chat_server.run());
 
     let http_server = HttpServer::new(move || {
         App::new()
+            .app_data(web::Data::new(stream_server.clone()))
+            .service(web::resource("/ws/broadcast/{stream_id}").to(video::video_stream_broadcaster))
+            .service(web::resource("/ws/view/{stream_id}").to(video::video_stream_viewer))
+            .service(web::resource("ws/chat").to(handlers::video_handler::chat_ws))
             .app_data(web::Data::new(server_tx.clone()))
             // WebSocket UI HTML file
             .service(web::resource("/").to(index))
