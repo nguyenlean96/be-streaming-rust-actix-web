@@ -1,11 +1,15 @@
 use std::{env, io};
 
+use actix_files::{Files, NamedFile};
 use actix_web::{
-    get,
-    middleware::Logger,
-    App, HttpRequest, HttpResponse, HttpServer, Result,
+    get, middleware::Logger, App, HttpRequest, HttpResponse, HttpServer, Responder, Result,
 };
 use dotenvy::dotenv;
+
+#[get("/favicon")]
+async fn favicon() -> Result<impl Responder> {
+    Ok(NamedFile::open("static/favicon.icon")?)
+}
 
 #[get("/")]
 async fn index(_req: HttpRequest) -> Result<HttpResponse> {
@@ -23,12 +27,18 @@ async fn main() -> io::Result<()> {
 
     log::info!("Starting server at http://localhost:{}", app_port);
 
-    HttpServer::new(move || App::new().wrap(Logger::default()).service(index))
-        .bind((
-            "127.0.0.1",
-            app_port.parse::<u16>().expect("Invalid port number"),
-        ))?
-        .workers(2)
-        .run()
-        .await
+    HttpServer::new(move || {
+        App::new()
+            .wrap(Logger::default())
+            .service(favicon)
+            .service(index)
+            .service(Files::new("/static", "static").show_files_listing())
+    })
+    .bind((
+        "127.0.0.1",
+        app_port.parse::<u16>().expect("Invalid port number"),
+    ))?
+    .workers(2)
+    .run()
+    .await
 }
